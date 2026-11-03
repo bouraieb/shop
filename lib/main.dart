@@ -1,23 +1,29 @@
 import 'dart:math';
 import 'dart:async';
+import 'dart:typed_data';
+import 'package:pdfx/pdfx.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// Online prototype: pages are fetched from the Quran Android image host.
-// Page images retain their source ownership. Confirm redistribution terms before release.
-// Supply the real printed-book URL using --dart-define=PRINT_URL=https://...
+// The original PDF is bundled unchanged for offline reading.
 const printUrl = String.fromEnvironment('PRINT_URL');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
-  runApp(MushafApp(prefs: prefs));
+  try {
+    final document = await PdfDocument.openAsset('assets/mushaf.pdf');
+    runApp(MushafApp(prefs: prefs, document: document));
+  } catch (error) {
+    runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('تعذّر فتح ملف المصحف المضمّن. أعد تثبيت النسخة الصحيحة.')))));
+  }
 }
 
 class MushafApp extends StatelessWidget {
+  final PdfDocument document;
   final SharedPreferences prefs;
-  const MushafApp({super.key, required this.prefs});
+  const MushafApp({super.key, required this.prefs, required this.document});
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -29,18 +35,20 @@ class MushafApp extends StatelessWidget {
     ),
     builder: (context, child) => Directionality(
       textDirection: TextDirection.rtl, child: child!),
-    home: Reader(prefs: prefs),
+    home: Reader(prefs: prefs, document: document),
   );
 }
 
 class Reader extends StatefulWidget {
+  final PdfDocument document;
   final SharedPreferences prefs;
-  const Reader({super.key, required this.prefs});
+  const Reader({super.key, required this.prefs, required this.document});
   @override
   State<Reader> createState() => _ReaderState();
 }
 
 class _ReaderState extends State<Reader> with WidgetsBindingObserver {
+  int get pageCount => widget.document.pagesCount;
   Timer? dateTimer;
   late String displayedDate;
   late final PageController controller;
@@ -60,17 +68,17 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
     displayedDate = dateKey();
     WidgetsBinding.instance.addObserver(this);
     dateTimer = Timer.periodic(const Duration(seconds: 30), (_) => checkDate());
-    page = (widget.prefs.getInt('lastPage') ?? 1).clamp(1, 604).toInt();
-    goal = (widget.prefs.getInt('goal') ?? 5).clamp(1, 604).toInt();
-    bookmarks = (widget.prefs.getStringList('bookmarks') ?? [])
+    page = (widget.prefs.getInt('pdfLastPageV1') ?? 1).clamp(1, pageCount).toInt();
+    goal = (widget.prefs.getInt('goal') ?? 5).clamp(1, pageCount).toInt();
+    bookmarks = (widget.prefs.getStringList('pdfBookmarksV1') ?? [])
         .map(int.tryParse).whereType<int>()
-        .where((p) => p >= 1 && p <= 604).toSet();
+        .where((p) => p >= 1 && p <= pageCount).toSet();
     today = readToday();
     controller = PageController(initialPage: page - 1);
   }
-  Set<int> readToday() => (widget.prefs.getStringList('read:${dateKey()}') ?? [])
+  Set<int> readToday() => (widget.prefs.getStringList('pdfReadV1:${dateKey()}') ?? [])
       .map(int.tryParse).whereType<int>()
-      .where((p) => p >= 1 && p <= 604).toSet();
+      .where((p) => p >= 1 && p <= pageCount).toSet();
   void checkDate() {
     if (!mounted || displayedDate == dateKey()) return;
     setState(() {
@@ -103,7 +111,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
   }
   void go(int number) {
     if (!mounted || !controller.hasClients) return;
-    controller.jumpToPage(number.clamp(1, 604).toInt() - 1);
+    controller.jumpToPage(number.clamp(1, pageCount).toInt() - 1);
   }
   Future<void> choosePage() async {
     String input = '$page';
@@ -112,7 +120,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
       content: TextFormField(initialValue: input,
         onChanged: (value) => input = value,
         keyboardType: TextInputType.number,
-        decoration: const InputDecoration(labelText: 'رقم من 1 إلى 604')),
+        decoration: InputDecoration(labelText: 'رقم من 1 إلى $pageCount')),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
         FilledButton(onPressed: () {
           const arabic = '٠١٢٣٤٥٦٧٨٩';
@@ -122,7 +130,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
             normalized = normalized.replaceAll(arabic[i], '$i').replaceAll(persian[i], '$i');
           }
           final n = int.tryParse(normalized);
-          if (n != null && n >= 1 && n <= 604) Navigator.pop(ctx, n);
+          if (n != null && n >= 1 && n <= pageCount) Navigator.pop(ctx, n);
         }, child: const Text('انتقال'))],
     ));
     if (number != null && mounted) go(number);
@@ -150,13 +158,13 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
   }
   Future<void> toggleBookmark() async {
     setState(() { if (!bookmarks.add(page)) bookmarks.remove(page); });
-    await storeBool(widget.prefs.setStringList('bookmarks', bookmarks.map((p) => '$p').toList()));
+    await storeBool(widget.prefs.setStringList('pdfBookmarksV1', bookmarks.map((p) => '$p').toList()));
   }
   Future<void> markRead() async {
-    final key = 'read:${dateKey()}';
+    final key = 'pdfReadV1:${dateKey()}';
     final completed = (widget.prefs.getStringList(key) ?? [])
         .map(int.tryParse).whereType<int>()
-        .where((p) => p >= 1 && p <= 604).toSet()..add(page);
+        .where((p) => p >= 1 && p <= pageCount).toSet()..add(page);
     final saved = await storeBool(widget.prefs.setStringList(
         key, completed.map((p) => '$p').toList()));
     if (!mounted) return;
@@ -197,33 +205,20 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
         Expanded(child: PageView.builder(
           controller: controller,
           physics: repeat ? const NeverScrollableScrollPhysics() : null,
-          itemCount: 604,
+          itemCount: pageCount,
           onPageChanged: (index) {
             setState(() { page = index + 1; hidden = false; });
-            storeBool(widget.prefs.setInt('lastPage', page));
+            storeBool(widget.prefs.setInt('pdfLastPageV1', page));
           },
           itemBuilder: (ctx, index) {
-            final name = (index + 1).toString().padLeft(3, '0');
             return Padding(padding: const EdgeInsets.all(12), child: Card(
               clipBehavior: Clip.antiAlias,
               child: hidden ? const Center(child: Text('استرجع الصفحة من ذاكرتك ثم اضغط «إظهار»')) :
-              InteractiveViewer(minScale: 1, maxScale: 4,
-                child: Center(child: Image.network(
-                  'https://android.quran.com/data/width_1260/page$name.png',
-                  fit: BoxFit.contain,
-                  // Initial memory/clarity tradeoff; verify on real devices.
-                  cacheWidth: 1260,
-                  loadingBuilder: (context, child, progress) => progress == null
-                      ? child : const Center(child: CircularProgressIndicator()),
-                  errorBuilder: (_, error, stack) => Center(child: Padding(
-                    padding: const EdgeInsets.all(24), child: Text(
-                      'صفحة ${index + 1}\n\nتعذّر تحميل الصفحة.\nتحقق من اتصال الإنترنت ثم انتقل إلى صفحة أخرى وعُد إليها.',
-                      textAlign: TextAlign.center))),
-                ))),
+              OfflinePdfPage(document: widget.document, number: index + 1),
             ));
           },
         )),
-        Text('صفحة $page من 604', style: Theme.of(context).textTheme.titleMedium),
+        Text('صفحة PDF $page من $pageCount', style: Theme.of(context).textTheme.titleMedium),
         Wrap(alignment: WrapAlignment.center, spacing: 4, children: [
           IconButton(tooltip: 'الصفحة السابقة', onPressed: repeat || page == 1 ? null : () => go(page - 1),
             icon: const Icon(Icons.arrow_back)),
@@ -235,7 +230,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
           IconButton(tooltip: 'تثبيت الصفحة للمراجعة، بلا صوت',
             onPressed: () => setState(() => repeat = !repeat),
             icon: Icon(Icons.repeat, color: repeat ? Theme.of(context).colorScheme.primary : null)),
-          IconButton(tooltip: 'الصفحة التالية', onPressed: repeat || page == 604 ? null : () => go(page + 1),
+          IconButton(tooltip: 'الصفحة التالية', onPressed: repeat || page == pageCount ? null : () => go(page + 1),
             icon: const Icon(Icons.arrow_forward)),
         ]),
         Padding(padding: const EdgeInsets.only(bottom: 16),
@@ -244,4 +239,53 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
       ])),
     );
   }
+}
+
+// Render pages serially; keep no network dependency for reading.
+class OfflinePdfPage extends StatefulWidget {
+  final PdfDocument document;
+  final int number;
+  const OfflinePdfPage({super.key, required this.document, required this.number});
+  @override
+  State<OfflinePdfPage> createState() => _OfflinePdfPageState();
+}
+class _OfflinePdfPageState extends State<OfflinePdfPage> {
+  static Future<void> queue = Future<void>.value();
+  late Future<Uint8List> image;
+  @override
+  void initState() { super.initState(); image = load(); }
+  Future<Uint8List> load() {
+    final completer = Completer<Uint8List>();
+    queue = queue.then((_) async {
+      try {
+        final pdfPage = await widget.document.getPage(widget.number);
+        try {
+          final rendered = await pdfPage.render(
+            width: 1800,
+            height: 1800 * pdfPage.height / pdfPage.width,
+            format: PdfPageImageFormat.png,
+            backgroundColor: '#FFFFFF',
+          );
+          if (rendered == null) throw StateError('PDF rendering failed');
+          completer.complete(rendered.bytes);
+        } finally { await pdfPage.close(); }
+      } catch (error, stack) {
+        if (!completer.isCompleted) completer.completeError(error, stack);
+      }
+    });
+    return completer.future;
+  }
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List>(
+    future: image,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return Center(child: TextButton(
+        onPressed: () => setState(() { image = load(); }),
+        child: const Text('تعذّر عرض الصفحة. اضغط لإعادة المحاولة.'),
+      ));
+      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      return InteractiveViewer(minScale: 1, maxScale: 5,
+        child: Center(child: Image.memory(snapshot.data!, fit: BoxFit.contain)));
+    },
+  );
 }
