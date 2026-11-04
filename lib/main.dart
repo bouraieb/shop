@@ -26,10 +26,7 @@ class MushafDocuments {
   int get pagesCount => parts.fold(0, (total, part) => total + part.pagesCount);
   static Future<MushafDocuments> open() async {
     final parts = <PdfDocument>[];
-    try {
-      for (var i = 1; i <= 6; i++) {
-        parts.add(await PdfDocument.openAsset('assets/BOOK_27070_$i.pdf'));
-      }
+    try {parts.add(await PdfDocument.openAsset('assets/mushaf.pdf'));
       return MushafDocuments(parts);
     } catch (_) {
       for (final part in parts) { await part.close(); }
