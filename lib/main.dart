@@ -6,22 +6,49 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-// The original PDF is bundled unchanged for offline reading.
+// Six original PDFs bundled unchanged for offline reading.
 const printUrl = String.fromEnvironment('PRINT_URL');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
   try {
-    final document = await PdfDocument.openAsset('assets/mushaf.pdf');
+    final document = await MushafDocuments.open();
     runApp(MushafApp(prefs: prefs, document: document));
   } catch (error) {
     runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('تعذّر فتح ملف المصحف المضمّن. أعد تثبيت النسخة الصحيحة.')))));
   }
 }
 
+class MushafDocuments {
+  final List<PdfDocument> parts;
+  MushafDocuments(this.parts);
+  int get pagesCount => parts.fold(0, (total, part) => total + part.pagesCount);
+  static Future<MushafDocuments> open() async {
+    final parts = <PdfDocument>[];
+    try {
+      for (var i = 1; i <= 6; i++) {
+        parts.add(await PdfDocument.openAsset('assets/BOOK_27070_$i.pdf'));
+      }
+      return MushafDocuments(parts);
+    } catch (_) {
+      for (final part in parts) { await part.close(); }
+      rethrow;
+    }
+  }
+  Future<PdfPage> getPage(int number) async {
+    if (number < 1 || number > pagesCount) throw RangeError('Invalid page');
+    var local = number;
+    for (final part in parts) {
+      if (local <= part.pagesCount) return await part.getPage(local);
+      local -= part.pagesCount;
+    }
+    throw RangeError('Invalid page');
+  }
+}
+
 class MushafApp extends StatelessWidget {
-  final PdfDocument document;
+  final MushafDocuments document;
   final SharedPreferences prefs;
   const MushafApp({super.key, required this.prefs, required this.document});
   @override
@@ -40,7 +67,7 @@ class MushafApp extends StatelessWidget {
 }
 
 class Reader extends StatefulWidget {
-  final PdfDocument document;
+  final MushafDocuments document;
   final SharedPreferences prefs;
   const Reader({super.key, required this.prefs, required this.document});
   @override
@@ -68,15 +95,15 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
     displayedDate = dateKey();
     WidgetsBinding.instance.addObserver(this);
     dateTimer = Timer.periodic(const Duration(seconds: 30), (_) => checkDate());
-    page = (widget.prefs.getInt('pdfLastPageV1') ?? 1).clamp(1, pageCount).toInt();
+    page = (widget.prefs.getInt('sixPartsLastPageV1') ?? 1).clamp(1, pageCount).toInt();
     goal = (widget.prefs.getInt('goal') ?? 5).clamp(1, pageCount).toInt();
-    bookmarks = (widget.prefs.getStringList('pdfBookmarksV1') ?? [])
+    bookmarks = (widget.prefs.getStringList('sixPartsBookmarksV1') ?? [])
         .map(int.tryParse).whereType<int>()
         .where((p) => p >= 1 && p <= pageCount).toSet();
     today = readToday();
     controller = PageController(initialPage: page - 1);
   }
-  Set<int> readToday() => (widget.prefs.getStringList('pdfReadV1:${dateKey()}') ?? [])
+  Set<int> readToday() => (widget.prefs.getStringList('sixPartsReadV1:${dateKey()}') ?? [])
       .map(int.tryParse).whereType<int>()
       .where((p) => p >= 1 && p <= pageCount).toSet();
   void checkDate() {
@@ -158,10 +185,10 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
   }
   Future<void> toggleBookmark() async {
     setState(() { if (!bookmarks.add(page)) bookmarks.remove(page); });
-    await storeBool(widget.prefs.setStringList('pdfBookmarksV1', bookmarks.map((p) => '$p').toList()));
+    await storeBool(widget.prefs.setStringList('sixPartsBookmarksV1', bookmarks.map((p) => '$p').toList()));
   }
   Future<void> markRead() async {
-    final key = 'pdfReadV1:${dateKey()}';
+    final key = 'sixPartsReadV1:${dateKey()}';
     final completed = (widget.prefs.getStringList(key) ?? [])
         .map(int.tryParse).whereType<int>()
         .where((p) => p >= 1 && p <= pageCount).toSet()..add(page);
@@ -208,7 +235,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
           itemCount: pageCount,
           onPageChanged: (index) {
             setState(() { page = index + 1; hidden = false; });
-            storeBool(widget.prefs.setInt('pdfLastPageV1', page));
+            storeBool(widget.prefs.setInt('sixPartsLastPageV1', page));
           },
           itemBuilder: (ctx, index) {
             return Padding(padding: const EdgeInsets.all(12), child: Card(
@@ -243,7 +270,7 @@ class _ReaderState extends State<Reader> with WidgetsBindingObserver {
 
 // Render pages serially; keep no network dependency for reading.
 class OfflinePdfPage extends StatefulWidget {
-  final PdfDocument document;
+  final MushafDocuments document;
   final int number;
   const OfflinePdfPage({super.key, required this.document, required this.number});
   @override
