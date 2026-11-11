@@ -58,6 +58,15 @@ class MushafApp extends StatelessWidget {
     title: 'رفيق الورد',
     theme: ThemeData(
       useMaterial3: true,
+      fontFamily: 'NotoSansArabic',
+      textTheme: const TextTheme(
+        bodyLarge: TextStyle(fontSize: 18, height: 1.65),
+        bodyMedium: TextStyle(fontSize: 16, height: 1.65),
+        bodySmall: TextStyle(fontSize: 14, height: 1.6),
+        titleLarge: TextStyle(fontSize: 23, height: 1.5, fontWeight: FontWeight.w600),
+        titleMedium: TextStyle(fontSize: 19, height: 1.5, fontWeight: FontWeight.w600),
+        labelLarge: TextStyle(fontSize: 16, height: 1.5, fontWeight: FontWeight.w600),
+      ),
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF17594A)),
       scaffoldBackgroundColor: const Color(0xFFF8F5EC),
     ),
@@ -384,7 +393,12 @@ class AdhkarScreen extends StatelessWidget {
   ];
   @override
   Widget build(BuildContext context) => DefaultTabController(length: 3, child: Scaffold(
-    appBar: AppBar(title: const Text('مختارات من الأذكار'), bottom: const TabBar(tabs: [Tab(text: 'الصباح'), Tab(text: 'المساء'), Tab(text: 'النوم')])),
+    appBar: AppBar(title: const Text('الأذكار'), centerTitle: true, bottom: TabBar(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      indicatorSize: TabBarIndicatorSize.tab,
+      indicator: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(24)),
+      labelColor: Colors.white, unselectedLabelColor: const Color(0xFF123E36),
+      dividerColor: Colors.transparent, tabs: const [Tab(text: 'الصباح'), Tab(text: 'المساء'), Tab(text: 'النوم')])),
     body: const TabBarView(children: [DhikrList(items: morning), DhikrList(items: evening), DhikrList(items: sleep)]),
   ));
 }
@@ -396,6 +410,10 @@ class DhikrList extends StatefulWidget {
 }
 class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixin {
   final Map<int, int> counts = {};
+  final PageController cards = PageController();
+  int activeCard = 0;
+  @override
+  void dispose() { cards.dispose(); super.dispose(); }
   double fontSize = 23;
   SharedPreferences? savedPrefs;
   String loadedDay = '';
@@ -420,29 +438,60 @@ class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixi
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return ListView.builder(padding: const EdgeInsets.all(16), itemCount: widget.items.length + 2, itemBuilder: (ctx, i) {
-      if (i == 0) return Column(children: [
-        Text('حجم الخط: ${fontSize.round()}'),
-        Slider(min: 18, max: 34, divisions: 16, value: fontSize, onChanged: (v) => setState(() => fontSize = v), onChangeEnd: (v) async { await savedPrefs?.setDouble('adhkarFontSize', v); }),
-        const Text('يُحفظ العدّاد لهذا اليوم. أعد فتح قسم الأذكار عند بدء يوم جديد.'),
-        const SizedBox(height: 12),
-      ]);
-      i -= 1;
-      if (i == widget.items.length) return TextButton(onPressed: savedPrefs == null ? null : () async { for (var n = 0; n < widget.items.length; n++) { await changeCount(n, 0); } }, child: const Text('إعادة العد من البداية'));
-      final item = widget.items[i];
-      final count = counts[i] ?? 0;
-      return Container(margin: const EdgeInsets.only(bottom: 18), decoration: BoxDecoration(
-        color: const Color(0xFFFFFCF4), borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFB89B60)),
-      ), child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const OrnamentDivider(),
-        const SizedBox(height: 14),
-        Text(item.text, textAlign: TextAlign.center, style: TextStyle(fontSize: fontSize, height: 1.9, color: const Color(0xFF123E36))),
-        Text(item.source, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 12),
-        FilledButton(onPressed: savedPrefs == null || count >= item.count ? null : () => changeCount(i, count + 1), child: Text(count >= item.count ? 'اكتمل ✓' : 'اضغط للعد: $count / ${item.count}')),
-      ])));
-    });
+    return Column(children: [
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: Row(children: [
+        const Icon(Icons.text_fields, color: Color(0xFF123E36)),
+        Expanded(child: Slider(min: 18, max: 34, divisions: 16, label: '${fontSize.round()}', value: fontSize,
+          onChanged: (v) => setState(() => fontSize = v),
+          onChangeEnd: (v) async { await savedPrefs?.setDouble('adhkarFontSize', v); })),
+      ])),
+      Expanded(child: PageView.builder(controller: cards, itemCount: widget.items.length,
+        onPageChanged: (i) => setState(() => activeCard = i),
+        itemBuilder: (ctx, i) {
+          final item = widget.items[i];
+          final count = counts[i] ?? 0;
+          final complete = count >= item.count;
+          return SingleChildScrollView(padding: const EdgeInsets.fromLTRB(20, 8, 20, 16), child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(color: const Color(0xFFFFFCF4), borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: const Color(0xFFCFBD94))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('الذِّكر ${i + 1} من ${widget.items.length}', textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFF776747), fontSize: 14)),
+              const SizedBox(height: 20),
+              Text(item.text, textAlign: TextAlign.center, style: TextStyle(fontFamily: 'NotoNaskhArabic', fontSize: fontSize,
+                fontWeight: FontWeight.w500, height: 2.0, color: const Color(0xFF123E36))),
+              const SizedBox(height: 16),
+              Text(item.source, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 24),
+              Center(child: Semantics(button: true, label: 'عداد الذكر: $count من ${item.count}',
+                child: SizedBox(width: 152, height: 152, child: Stack(alignment: Alignment.center, children: [
+                  SizedBox(width: 152, height: 152, child: CircularProgressIndicator(
+                    value: count / item.count, strokeWidth: 5, backgroundColor: const Color(0xFFE9E0CA), color: const Color(0xFFB89B60))),
+                  SizedBox(width: 134, height: 134, child: FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF123E36), disabledBackgroundColor: const Color(0xFF275A4E),
+                      disabledForegroundColor: Colors.white, shape: const CircleBorder(), padding: const EdgeInsets.all(8)),
+                    onPressed: savedPrefs == null || complete ? null : () => changeCount(i, count + 1),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(complete ? '✓' : '$count', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+                      Text(complete ? 'اكتمل' : 'من ${item.count}', style: const TextStyle(fontSize: 16)),
+                    ]))),
+                ])))),
+              const SizedBox(height: 12),
+              TextButton.icon(onPressed: savedPrefs == null || count == 0 ? null : () => changeCount(i, 0),
+                icon: const Icon(Icons.restart_alt), label: const Text('إعادة عدّ هذا الذكر')),
+            ])));
+        })),
+      SafeArea(top: false, child: Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 12), child: Column(children: [
+        LinearProgressIndicator(value: (activeCard + 1) / widget.items.length, color: const Color(0xFF123E36), backgroundColor: const Color(0xFFE9E0CA)),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          TextButton(onPressed: activeCard == 0 ? null : () => cards.previousPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut), child: const Text('السابق')),
+          Text('${activeCard + 1} / ${widget.items.length}'),
+          TextButton(onPressed: activeCard == widget.items.length - 1 ? null : () => cards.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeOut), child: const Text('التالي')),
+        ]),
+        const Text('تُحفظ العدادات لهذا اليوم على جهازك', style: TextStyle(fontSize: 12)),
+      ]))),
+    ]);
   }
 }
 
@@ -593,7 +642,11 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
       final minutes = (remaining.inMinutes % 60).toString().padLeft(2, '0');
       final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
       return Container(margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFB89B60))), child: Column(children: [
+        const Icon(Icons.mosque_outlined, color: Color(0xFFF1D8A4), size: 30),
+        const SizedBox(height: 8),
         Text('الصلاة القادمة: ${labels[next.key]}', style: const TextStyle(color: Colors.white, fontSize: 21)),
+        Text(format(next.value.subtract(Duration(minutes: adjustments[next.key])), next.key), textDirection: TextDirection.ltr, style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
         Text('$hours:$minutes:$seconds', textDirection: TextDirection.ltr, style: const TextStyle(color: Color(0xFFF1D8A4), fontSize: 30, fontWeight: FontWeight.bold)),
         const Text('الوقت المتبقي حسب المواقيت المحسوبة وإعداداتك', style: TextStyle(color: Colors.white)),
       ]));
@@ -608,8 +661,8 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
     List<DateTime>? values;
     try { values = times(); } catch (_) { values = null; }
     return Scaffold(appBar: AppBar(title: const Text('مواقيت الصلاة'), actions: [IconButton(onPressed: settings, tooltip: 'المدينة وطريقة الحساب', icon: const Icon(Icons.settings))]), body: ListView(padding: const EdgeInsets.all(20), children: [
-      const OrnamentDivider(),
-      const SizedBox(height: 16),
+      const Icon(Icons.location_on_outlined, color: Color(0xFF123E36), size: 28),
+      const SizedBox(height: 8),
       Text(city, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: const Color(0xFF123E36), fontWeight: FontWeight.bold)),
       Text('${date.year}/${date.month}/${date.day} · UTC ${effectiveOffset >= 0 ? "+" : ""}$effectiveOffset'),
       Text('الساعة الآن: ${cityNow().hour.toString().padLeft(2, "0")}:${cityNow().minute.toString().padLeft(2, "0")}:${cityNow().second.toString().padLeft(2, "0")} · ${followPhoneZone ? "توقيت الهاتف" : "توقيت يدوي"}'),
@@ -630,6 +683,13 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
           Text(labels[i], style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w600, color: Color(0xFF123E36))),
           Text(format(values[i], i), textDirection: TextDirection.ltr, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF123E36))),
         ]))),
+      const Card(child: Padding(padding: EdgeInsets.all(16), child: Row(children: [
+        Icon(Icons.volume_off_outlined, color: Color(0xFF776747)), SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('الأذان التلقائي', style: TextStyle(fontWeight: FontWeight.bold)),
+          Text('غير مضاف بعد؛ يحتاج تسجيل الأذان وإعداد تنبيهات الخلفية', style: TextStyle(fontSize: 13)),
+        ])),
+      ]))),
       const Padding(padding: EdgeInsets.only(top: 16), child: Text('الحساب يعمل دون إنترنت. يمكنك تغيير المدينة أو إدخال إحداثيات أي مدينة من الإعدادات.')),
     ]));
   }
