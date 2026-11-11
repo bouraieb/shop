@@ -399,7 +399,7 @@ class AdhkarScreen extends StatelessWidget {
       indicator: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(24)),
       labelColor: Colors.white, unselectedLabelColor: const Color(0xFF123E36),
       dividerColor: Colors.transparent, tabs: const [Tab(text: 'الصباح'), Tab(text: 'المساء'), Tab(text: 'النوم')])),
-    body: const TabBarView(children: [DhikrList(items: morning), DhikrList(items: evening), DhikrList(items: sleep)]),
+    body: const TabBarView(physics: NeverScrollableScrollPhysics(), children: [DhikrList(items: morning), DhikrList(items: evening), DhikrList(items: sleep)]),
   ));
 }
 class DhikrList extends StatefulWidget {
@@ -408,30 +408,75 @@ class DhikrList extends StatefulWidget {
   @override
   State<DhikrList> createState() => _DhikrListState();
 }
-class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixin {
+class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
+  static final sharedFont = ValueNotifier<double>(23);
+  Timer? dayTimer;
+  Future<void> saveQueue = Future<void>.value();
+  void syncFont() { if (mounted) setState(() => fontSize = sharedFont.value); }
+  void checkDay() {
+    if (!mounted || savedPrefs == null || loadedDay == dayKey) return;
+    final day = dayKey;
+    setState(() {
+      loadedDay = day;
+      for (var i = 0; i < widget.items.length; i++) {
+        counts[i] = (savedPrefs!.getInt('$storageKey:$day:$i') ?? 0).clamp(0, widget.items[i].count).toInt();
+      }
+    });
+  }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) checkDay();
+  }
   final Map<int, int> counts = {};
   final PageController cards = PageController();
   int activeCard = 0;
   @override
-  void dispose() { cards.dispose(); super.dispose(); }
+  void dispose() { dayTimer?.cancel(); WidgetsBinding.instance.removeObserver(this); sharedFont.removeListener(syncFont); cards.dispose(); super.dispose(); }
   double fontSize = 23;
   SharedPreferences? savedPrefs;
   String loadedDay = '';
   String get storageKey => 'adhkar:${identical(widget.items, AdhkarScreen.morning) ? "morning" : identical(widget.items, AdhkarScreen.evening) ? "evening" : "sleep"}';
   String get dayKey { final d = DateTime.now(); return '${d.year}-${d.month}-${d.day}'; }
   @override
-  void initState() { super.initState(); restoreCounts(); }
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    sharedFont.addListener(syncFont);
+    dayTimer = Timer.periodic(const Duration(seconds: 1), (_) => checkDay());
+    restoreCounts();
+  }
   Future<void> restoreCounts() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { loadedDay = dayKey; savedPrefs = p; fontSize = (p.getDouble('adhkarFontSize') ?? 23).clamp(18, 34).toDouble(); for (var i = 0; i < widget.items.length; i++) { counts[i] = (p.getInt('$storageKey:$dayKey:$i') ?? 0).clamp(0, widget.items[i].count).toInt(); } });
+    sharedFont.value = (p.getDouble('adhkarFontSize') ?? 23).clamp(18, 34).toDouble();
+    final day = dayKey;
+    setState(() { loadedDay = day; savedPrefs = p; fontSize = sharedFont.value; for (var i = 0; i < widget.items.length; i++) { counts[i] = (p.getInt('$storageKey:$day:$i') ?? 0).clamp(0, widget.items[i].count).toInt(); } });
   }
-  Future<void> changeCount(int index, int value) async {
-    if (savedPrefs == null) return;
-    if (loadedDay != dayKey) { await restoreCounts(); return; }
-    final old = counts[index] ?? 0;
-    setState(() => counts[index] = value);
-    try { if (!await savedPrefs!.setInt('$storageKey:$dayKey:$index', value)) throw StateError('Save failed'); } catch (_) { if (!mounted) return; setState(() => counts[index] = old); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر حفظ العدّاد.'))); }
+  Future<void> changeCount(int index, {bool reset = false}) {
+    if (savedPrefs == null || !mounted) return Future<void>.value();
+    checkDay();
+    final prefs = savedPrefs!;
+    final day = loadedDay;
+    final key = '$storageKey:$day:$index';
+    final limit = widget.items[index].count;
+    saveQueue = saveQueue.then((_) async {
+      try {
+        final previous = (prefs.getInt(key) ?? 0).clamp(0, limit).toInt();
+        final value = reset ? 0 : min(previous + 1, limit);
+        if (!await prefs.setInt(key, value)) throw StateError('Save failed');
+        if (mounted && loadedDay == day) setState(() => counts[index] = value);
+      } catch (_) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر حفظ العدّاد. أعد المحاولة.')));
+      }
+    });
+    return saveQueue;
+  }
+  Future<void> saveFont(double value) async {
+    try {
+      if (savedPrefs == null || !await savedPrefs!.setDouble('adhkarFontSize', value)) throw StateError('Save failed');
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر حفظ حجم الخط.')));
+    }
   }
   @override
   bool get wantKeepAlive => true;
@@ -442,8 +487,8 @@ class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixi
       Padding(padding: const EdgeInsets.symmetric(horizontal: 20), child: Row(children: [
         const Icon(Icons.text_fields, color: Color(0xFF123E36)),
         Expanded(child: Slider(min: 18, max: 34, divisions: 16, label: '${fontSize.round()}', value: fontSize,
-          onChanged: (v) => setState(() => fontSize = v),
-          onChangeEnd: (v) async { await savedPrefs?.setDouble('adhkarFontSize', v); })),
+          onChanged: savedPrefs == null ? null : (v) => sharedFont.value = v,
+          onChangeEnd: saveFont)),
       ])),
       Expanded(child: PageView.builder(controller: cards, itemCount: widget.items.length,
         onPageChanged: (i) => setState(() => activeCard = i),
@@ -471,14 +516,14 @@ class _DhikrListState extends State<DhikrList> with AutomaticKeepAliveClientMixi
                   SizedBox(width: 134, height: 134, child: FilledButton(
                     style: FilledButton.styleFrom(backgroundColor: const Color(0xFF123E36), disabledBackgroundColor: const Color(0xFF275A4E),
                       disabledForegroundColor: Colors.white, shape: const CircleBorder(), padding: const EdgeInsets.all(8)),
-                    onPressed: savedPrefs == null || complete ? null : () => changeCount(i, count + 1),
+                    onPressed: savedPrefs == null || complete ? null : () => changeCount(i),
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
                       Text(complete ? '✓' : '$count', style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
                       Text(complete ? 'اكتمل' : 'من ${item.count}', style: const TextStyle(fontSize: 16)),
                     ]))),
                 ])))),
               const SizedBox(height: 12),
-              TextButton.icon(onPressed: savedPrefs == null || count == 0 ? null : () => changeCount(i, 0),
+              TextButton.icon(onPressed: savedPrefs == null || count == 0 ? null : () => changeCount(i, reset: true),
                 icon: const Icon(Icons.restart_alt), label: const Text('إعادة عدّ هذا الذكر')),
             ])));
         })),
@@ -603,7 +648,76 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
         setState(() { city = name.text.trim(); latitude = a; longitude = b; utcOffset = z; followPhoneZone = usePhoneZone; if (followToday) date = cityNow(); customAngles = useCustom; fajrAngle = f; ishaAngle = s; adjustments = values.map((n) => n!.toInt()).toList(); });
         Navigator.pop(ctx, true);
       }, child: const Text('حفظ'))],
-صر: ظل المثل. مواقيت حسابية وليست رزنامة رسمية. تحقق من إعداد المدينة والتوقيت الصيفي وطابقها مع المسجد المحلي. لا توجد تنبيهات أو أذان صوتي في هذه النسخة.'),
+    )));
+    // Dispose after the closing dialog animation has released its text fields.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    for (final c in [name, lat, lon, offset, fajr, isha, ...corrections]) { c.dispose(); }
+    if (accepted == true) await save();
+  }
+  final Map<String, List<DateTime>> prayerCache = {};
+  List<DateTime> times([DateTime? requestedDate]) {
+    final calculationDate = requestedDate ?? date;
+    final key = '${calculationDate.year}-${calculationDate.month}-${calculationDate.day}:$latitude:$longitude:$customAngles:$fajrAngle:$ishaAngle';
+    final cached = prayerCache[key];
+    if (cached != null) return cached;
+    final params = CalculationMethodParameters.muslimWorldLeague();
+    if (customAngles) { params.fajrAngle = fajrAngle; params.ishaAngle = ishaAngle; }
+    final t = PrayerTimes(coordinates: Coordinates(latitude, longitude), date: DateTime(calculationDate.year, calculationDate.month, calculationDate.day), calculationParameters: params);
+    final result = [t.fajr, t.sunrise, t.dhuhr, t.asr, t.maghrib, t.isha];
+    if (prayerCache.length >= 4) prayerCache.clear();
+    prayerCache[key] = result;
+    return result;
+  }
+  Widget nextPrayerCard(List<DateTime> todayTimes) {
+    try {
+      final now = DateTime.now().toUtc();
+      final candidates = <MapEntry<int, DateTime>>[];
+      for (final day in [date, DateTime(date.year, date.month, date.day + 1)]) {
+        final daily = day == date ? todayTimes : times(day);
+        for (final i in [0, 2, 3, 4, 5]) {
+          final instant = daily[i].toUtc().add(Duration(minutes: adjustments[i]));
+          if (instant.isAfter(now)) candidates.add(MapEntry(i, instant));
+        }
+      }
+      candidates.sort((a, b) => a.value.compareTo(b.value));
+      if (candidates.isEmpty) return const SizedBox.shrink();
+      final next = candidates.first;
+      final remaining = next.value.difference(now);
+      final hours = remaining.inHours.toString().padLeft(2, '0');
+      final minutes = (remaining.inMinutes % 60).toString().padLeft(2, '0');
+      final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
+      return Container(margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFB89B60))), child: Column(children: [
+        const Icon(Icons.mosque_outlined, color: Color(0xFFF1D8A4), size: 30),
+        const SizedBox(height: 8),
+        Text('الصلاة القادمة: ${labels[next.key]}', style: const TextStyle(color: Colors.white, fontSize: 21)),
+        Text(format(next.value.subtract(Duration(minutes: adjustments[next.key])), next.key), textDirection: TextDirection.ltr, style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Text('$hours:$minutes:$seconds', textDirection: TextDirection.ltr, style: const TextStyle(color: Color(0xFFF1D8A4), fontSize: 30, fontWeight: FontWeight.bold)),
+        const Text('الوقت المتبقي حسب المواقيت المحسوبة وإعداداتك', style: TextStyle(color: Colors.white)),
+      ]));
+    } catch (_) { return const Text('تعذّر تحديد الصلاة القادمة لهذه الإعدادات.'); }
+  }
+  String format(DateTime time, int index) {
+    final local = time.toUtc().add(Duration(minutes: (effectiveOffset * 60).round() + adjustments[index]));
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+  @override
+  Widget build(BuildContext context) {
+    List<DateTime>? values;
+    try { values = times(); } catch (_) { values = null; }
+    return Scaffold(appBar: AppBar(title: const Text('مواقيت الصلاة'), actions: [IconButton(onPressed: settings, tooltip: 'المدينة وطريقة الحساب', icon: const Icon(Icons.settings))]), body: ListView(padding: const EdgeInsets.all(20), children: [
+      const Icon(Icons.location_on_outlined, color: Color(0xFF123E36), size: 28),
+      const SizedBox(height: 8),
+      Text(city, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: const Color(0xFF123E36), fontWeight: FontWeight.bold)),
+      Text('${date.year}/${date.month}/${date.day} · UTC ${effectiveOffset >= 0 ? "+" : ""}$effectiveOffset'),
+      Text('الساعة الآن: ${cityNow().hour.toString().padLeft(2, "0")}:${cityNow().minute.toString().padLeft(2, "0")}:${cityNow().second.toString().padLeft(2, "0")} · ${followPhoneZone ? "توقيت الهاتف" : "توقيت يدوي"}'),
+      if (!followToday) TextButton(onPressed: () => setState(() { followToday = true; date = cityNow(); }), child: const Text('العودة إلى مواقيت اليوم التلقائية')),
+      TextButton.icon(icon: const Icon(Icons.calendar_month), label: const Text('اختيار يوم'), onPressed: () async {
+        final result = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2020), lastDate: DateTime(2100));
+        if (result != null && mounted) setState(() { followToday = false; date = result; });
+      }),
+      Text(customAngles ? 'حساب بزوايا مخصصة: الفجر $fajrAngle°، العشاء $ishaAngle°' : 'طريقة الحساب: رابطة العالم الإسلامي'),
+      const Text('العصر: ظل المثل. مواقيت حسابية وليست رزنامة رسمية. تحقق من إعداد المدينة والتوقيت الصيفي وطابقها مع المسجد المحلي. لا توجد تنبيهات أو أذان صوتي في هذه النسخة.'),
       const SizedBox(height: 12),
       if (followToday && values != null) nextPrayerCard(values),
       if (values == null) const Text('تعذّر حساب المواقيت لهذه الإعدادات. راجع المدينة والزوايا.')
