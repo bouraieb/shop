@@ -603,76 +603,7 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
         setState(() { city = name.text.trim(); latitude = a; longitude = b; utcOffset = z; followPhoneZone = usePhoneZone; if (followToday) date = cityNow(); customAngles = useCustom; fajrAngle = f; ishaAngle = s; adjustments = values.map((n) => n!.toInt()).toList(); });
         Navigator.pop(ctx, true);
       }, child: const Text('حفظ'))],
-    )));
-    // Dispose after the closing dialog animation has released its text fields.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    for (final c in [name, lat, lon, offset, fajr, isha, ...corrections]) { c.dispose(); }
-    if (accepted == true) await save();
-  }
-  final Map<String, List<DateTime>> prayerCache = {};
-  List<DateTime> times([DateTime? requestedDate]) {
-    final calculationDate = requestedDate ?? date;
-    final key = '${calculationDate.year}-${calculationDate.month}-${calculationDate.day}:$latitude:$longitude:$customAngles:$fajrAngle:$ishaAngle';
-    final cached = prayerCache[key];
-    if (cached != null) return cached;
-    final params = CalculationMethodParameters.muslimWorldLeague();
-    if (customAngles) { params.fajrAngle = fajrAngle; params.ishaAngle = ishaAngle; }
-    final t = PrayerTimes(coordinates: Coordinates(latitude, longitude), date: DateTime(calculationDate.year, calculationDate.month, calculationDate.day), calculationParameters: params);
-    final result = [t.fajr, t.sunrise, t.dhuhr, t.asr, t.maghrib, t.isha];
-    if (prayerCache.length >= 4) prayerCache.clear();
-    prayerCache[key] = result;
-    return result;
-  }
-  Widget nextPrayerCard(List<DateTime> todayTimes) {
-    try {
-      final now = DateTime.now().toUtc();
-      final candidates = <MapEntry<int, DateTime>>[];
-      for (final day in [date, DateTime(date.year, date.month, date.day + 1)]) {
-        final daily = day == date ? todayTimes : times(day);
-        for (final i in [0, 2, 3, 4, 5]) {
-          final instant = daily[i].toUtc().add(Duration(minutes: adjustments[i]));
-          if (instant.isAfter(now)) candidates.add(MapEntry(i, instant));
-        }
-      }
-      candidates.sort((a, b) => a.value.compareTo(b.value));
-      if (candidates.isEmpty) return const SizedBox.shrink();
-      final next = candidates.first;
-      final remaining = next.value.difference(now);
-      final hours = remaining.inHours.toString().padLeft(2, '0');
-      final minutes = (remaining.inMinutes % 60).toString().padLeft(2, '0');
-      final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
-      return Container(margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFB89B60))), child: Column(children: [
-        const Icon(Icons.mosque_outlined, color: Color(0xFFF1D8A4), size: 30),
-        const SizedBox(height: 8),
-        Text('الصلاة القادمة: ${labels[next.key]}', style: const TextStyle(color: Colors.white, fontSize: 21)),
-        Text(format(next.value.subtract(Duration(minutes: adjustments[next.key])), next.key), textDirection: TextDirection.ltr, style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Text('$hours:$minutes:$seconds', textDirection: TextDirection.ltr, style: const TextStyle(color: Color(0xFFF1D8A4), fontSize: 30, fontWeight: FontWeight.bold)),
-        const Text('الوقت المتبقي حسب المواقيت المحسوبة وإعداداتك', style: TextStyle(color: Colors.white)),
-      ]));
-    } catch (_) { return const Text('تعذّر تحديد الصلاة القادمة لهذه الإعدادات.'); }
-  }
-  String format(DateTime time, int index) {
-    final local = time.toUtc().add(Duration(minutes: (effectiveOffset * 60).round() + adjustments[index]));
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-  @override
-  Widget build(BuildContext context) {
-    List<DateTime>? values;
-    try { values = times(); } catch (_) { values = null; }
-    return Scaffold(appBar: AppBar(title: const Text('مواقيت الصلاة'), actions: [IconButton(onPressed: settings, tooltip: 'المدينة وطريقة الحساب', icon: const Icon(Icons.settings))]), body: ListView(padding: const EdgeInsets.all(20), children: [
-      const Icon(Icons.location_on_outlined, color: Color(0xFF123E36), size: 28),
-      const SizedBox(height: 8),
-      Text(city, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: const Color(0xFF123E36), fontWeight: FontWeight.bold)),
-      Text('${date.year}/${date.month}/${date.day} · UTC ${effectiveOffset >= 0 ? "+" : ""}$effectiveOffset'),
-      Text('الساعة الآن: ${cityNow().hour.toString().padLeft(2, "0")}:${cityNow().minute.toString().padLeft(2, "0")}:${cityNow().second.toString().padLeft(2, "0")} · ${followPhoneZone ? "توقيت الهاتف" : "توقيت يدوي"}'),
-      if (!followToday) TextButton(onPressed: () => setState(() { followToday = true; date = cityNow(); }), child: const Text('العودة إلى مواقيت اليوم التلقائية')),
-      TextButton.icon(icon: const Icon(Icons.calendar_month), label: const Text('اختيار يوم'), onPressed: () async {
-        final result = await showDatePicker(context: context, initialDate: date, firstDate: DateTime(2020), lastDate: DateTime(2100));
-        if (result != null && mounted) setState(() { followToday = false; date = result; });
-      }),
-      Text(customAngles ? 'حساب بزوايا مخصصة: الفجر $fajrAngle°، العشاء $ishaAngle°' : 'طريقة الحساب: رابطة العالم الإسلامي'),
-      const Text('العصر: ظل المثل. مواقيت حسابية وليست رزنامة رسمية. تحقق من إعداد المدينة والتوقيت الصيفي وطابقها مع المسجد المحلي. لا توجد تنبيهات أو أذان صوتي في هذه النسخة.'),
+صر: ظل المثل. مواقيت حسابية وليست رزنامة رسمية. تحقق من إعداد المدينة والتوقيت الصيفي وطابقها مع المسجد المحلي. لا توجد تنبيهات أو أذان صوتي في هذه النسخة.'),
       const SizedBox(height: 12),
       if (followToday && values != null) nextPrayerCard(values),
       if (values == null) const Text('تعذّر حساب المواقيت لهذه الإعدادات. راجع المدينة والزوايا.')
