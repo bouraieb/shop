@@ -1,15 +1,1 @@
-workflows:
-  android-apk:
-    name: Build Mushaf APK
-    environment:
-      flutter: stable
-    scripts:
-      - name: Prepare Android project
-        script: |
-          flutter create --platforms=android --project-name=mushaf_reader .
-          flutter pub get
-      - name: Build APK
-        script: flutter build apk --release
-    artifacts:
-      - build/app/outputs/flutter-apk/app-release.apk
 
