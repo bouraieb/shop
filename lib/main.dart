@@ -583,35 +583,7 @@ class _PrayerScreenState extends State<PrayerScreen> with WidgetsBindingObserver
         for (final i in [0, 2, 3, 4, 5]) {
           final instant = daily[i].toUtc().add(Duration(minutes: adjustments[i]));
           if (instant.isAfter(now)) candidates.add(MapEntry(i, instant));
-        }
-      }
-      candidates.sort((a, b) => a.value.compareTo(b.value));
-      if (candidates.isEmpty) return const SizedBox.shrink();
-      final next = candidates.first;
-      final remaining = next.value.difference(now);
-      final hours = remaining.inHours.toString().padLeft(2, '0');
-      final minutes = (remaining.inMinutes % 60).toString().padLeft(2, '0');
-      final seconds = (remaining.inSeconds % 60).toString().padLeft(2, '0');
-      return Container(margin: const EdgeInsets.only(bottom: 18), padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: const Color(0xFF123E36), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFB89B60))), child: Column(children: [
-        Text('الصلاة القادمة: ${labels[next.key]}', style: const TextStyle(color: Colors.white, fontSize: 21)),
-        Text('$hours:$minutes:$seconds', textDirection: TextDirection.ltr, style: const TextStyle(color: Color(0xFFF1D8A4), fontSize: 30, fontWeight: FontWeight.bold)),
-        const Text('الوقت المتبقي حسب المواقيت المحسوبة وإعداداتك', style: TextStyle(color: Colors.white)),
-      ]));
-    } catch (_) { return const Text('تعذّر تحديد الصلاة القادمة لهذه الإعدادات.'); }
-  }
-  String format(DateTime time, int index) {
-    final local = time.toUtc().add(Duration(minutes: (effectiveOffset * 60).round() + adjustments[index]));
-    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-  }
-  @override
-  Widget build(BuildContext context) {
-    List<DateTime>? values;
-    try { values = times(); } catch (_) { values = null; }
-    return Scaffold(appBar: AppBar(title: const Text('مواقيت الصلاة'), actions: [IconButton(onPressed: settings, tooltip: 'المدينة وطريقة الحساب', icon: const Icon(Icons.settings))]), body: ListView(padding: const EdgeInsets.all(20), children: [
-      const OrnamentDivider(),
-      const SizedBox(height: 16),
-      Text(city, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall?.copyWith(color: const Color(0xFF123E36), fontWeight: FontWeight.bold)),
-      Text('${date.year}/${date.month}/${date.day} · UTC ${effectiveOffset >= 0 ? "+" : ""}$effectiveOffset'),
+ar}/${date.month}/${date.day} · UTC ${effectiveOffset >= 0 ? "+" : ""}$effectiveOffset'),
       Text('الساعة الآن: ${cityNow().hour.toString().padLeft(2, "0")}:${cityNow().minute.toString().padLeft(2, "0")}:${cityNow().second.toString().padLeft(2, "0")} · ${followPhoneZone ? "توقيت الهاتف" : "توقيت يدوي"}'),
       if (!followToday) TextButton(onPressed: () => setState(() { followToday = true; date = cityNow(); }), child: const Text('العودة إلى مواقيت اليوم التلقائية')),
       TextButton.icon(icon: const Icon(Icons.calendar_month), label: const Text('اختيار يوم'), onPressed: () async {
