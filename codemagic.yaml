@@ -1,1 +1,46 @@
+workflows:
+  android-apk:
+    name: Mushaf Android APK
+    environment:
+      flutter: stable
+    scripts:
+      - name: Apply uploaded update
+        script: |
+          set -eu
+          test -s Mushaf-Upload-1746-u9.zip
+          unzip -t Mushaf-Upload-1746-u9.zip
+          unzip -o Mushaf-Upload-1746-u9.zip 'lib/*' 'assets/fonts/*'
+      - name: Show build tool versions
+        script: |
+          set -eu
+          flutter --version
+          dart --version
+      - name: Verify required source and assets
+        script: |
+          set -eu
+          test -s lib/main.dart
+          test -s pubspec.yaml
+          test -s assets/fonts/NotoSansArabic.ttf
+          test -s assets/fonts/NotoNaskhArabic.ttf
+          for i in 1 2 3 4 5 6; do
+            file="assets/BOOK_27070_${i}.pdf"
+            if [ ! -s "$file" ]; then
+              echo "Required PDF missing or empty: $file"
+              exit 1
+            fi
+          done
+      - name: Prepare Android project if missing
+        script: |
+          set -e
+          if [ ! -d android ]; then
+            flutter create --empty --platforms=android --project-name=mushaf_reader --no-pub .
+          fi
+      - name: Get dependencies
+        script: flutter pub get
+      - name: Analyze Dart code
+        script: flutter analyze
+      - name: Build test APK
+        script: flutter build apk --debug
+    artifacts:
+      - build/app/outputs/flutter-apk/app-debug.apk
 
