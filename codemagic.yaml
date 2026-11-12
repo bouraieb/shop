@@ -1,1 +1,42 @@
+workflows:
+  android-apk:
+    name: Build Mushaf APK
+    environment:
+      flutter: stable
+    scripts:
+      - name: Apply current recovery package
+        script: |
+          set -eu
+          PACKAGE="Mushaf-6f61438-Upload.zip"
+          test -s "$PACKAGE"
+          unzip -t "$PACKAGE"
+          unzip -o "$PACKAGE" lib/main.dart pubspec.yaml
+      - name: Verify source and original PDF assets
+        script: |
+          set -eu
+          test -s lib/main.dart
+          test -s pubspec.yaml
+          for i in 1 2 3 4 5 6; do
+            FILE="assets/BOOK_27070_${i}.pdf"
+            if [ ! -s "$FILE" ]; then
+              echo "Missing required PDF: $FILE"
+              exit 1
+            fi
+          done
+      - name: Prepare Android project
+        script: |
+          set -eu
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name=mushaf_reader --no-pub .
+          fi
+          unzip -o Mushaf-6f61438-Upload.zip lib/main.dart pubspec.yaml
+      - name: Get bundled dependencies
+        script: |
+          set -eu
+          flutter --version
+          flutter pub get
+      - name: Build APK
+        script: flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
 
